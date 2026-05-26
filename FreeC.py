@@ -1,60 +1,47 @@
+import ctypes
 import os
 import shutil
+import sys
 import threading
 
 
-# 获取系统变量
-systemDrive = os.environ.get('systemdrive')
-winDir = os.environ.get('windir')
-userProfile = os.environ.get('userprofile')
-systemDrive += '\\'
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except Exception:
+        return False
 
-# 删除文件字典
-filesDict = {
-    systemDrive:['.tmp', '._mp', '.log', '.gid',
-                 '.chk', '.old'],
-    winDir:['.bak']
-}
-# 删除文件夹字典，只清空，不删除根文件
-directoriesDict = {
-    systemDrive:['recycled'],
-    winDir:['prefetch', 'temp'],
-    userProfile:['cookies', 'recent',
-                 'Local Settings\\Temporary Internet Files',
-                 'Local Settings\\Temp']
-}
 
-print_lock = threading.Lock()
+def run_as_admin():
+    try:
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, " ".join(sys.argv), None, 1
+        )
+    except Exception as e:
+        print(f"[ERROR] 无法提升至管理员权限: {e}")
+        os.system("pause")
+        sys.exit(1)
+
 
 def printLock(message):
-    """安全输出日志"""
     with print_lock:
         print(message)
 
+
 def deleteFilesWithExtension(directory, extension):
-    """
-    递归删除所有指定类型的文件
-    param:
-    directory: 遍历的文件夹 e.g. D:/demo
-    extension: 指定的文件类型 e.g.  .txt
-    """
     for root, _, files in os.walk(directory):
-        # 遍历文件
         for file in files:
-            # 检查文件后缀是否匹配
             if file.endswith(extension):
                 filePath = os.path.join(root, file)
-                # 删除文件
                 try:
                     printLock(f"Deleting: {filePath}")
                     os.remove(filePath)
                     printLock(f"Deleted: {filePath}")
-                # 删除文件时异常
                 except OSError as e:
                     printLock(f"Error while deleting\n{filePath}\n{e}")
 
+
 def deleteDirectory(directory):
-    """清空文件夹"""
     try:
         printLock(f"Deleting: {directory}")
         shutil.rmtree(directory)
@@ -62,32 +49,74 @@ def deleteDirectory(directory):
     except Exception as e:
         printLock(f"Error deleting {directory}:\n{e}")
 
-# 线程池
-threads = []
-diry = 'C:\\Windows\\SoftwareDistribution\\Download\\'
-a = threading.Thread(target=deleteDirectory,
-                     args=(diry,))
-threads.append(a)
-# 添加删除文件线程
-for path, exts in filesDict.items():
-    for ext in exts:
-        b = threading.Thread(target=deleteFilesWithExtension, 
-                             args=(path, ext))
-        threads.append(b)
-# 添加删除文件夹线程
-for path, directs in directoriesDict.items():
-    for direct in directs:
-        __path = os.path.join(path, direct)
-        c = threading.Thread(target=deleteDirectory,
-                             args=(__path,))
-        threads.append(c)
 
-if __name__ == '__main__':
+systemDrive = os.environ.get("systemdrive")
+winDir = os.environ.get("windir")
+userProfile = os.environ.get("userprofile")
+systemDrive += "\\"
+
+filesDict = {
+    systemDrive: [".tmp", "._mp", ".log", ".gid", ".chk", ".old"],
+    winDir: [".bak"],
+}
+
+directoriesDict = {
+    systemDrive: ["recycled"],
+    winDir: ["prefetch", "temp"],
+    userProfile: [
+        "cookies",
+        "recent",
+        "Local Settings\\Temporary Internet Files",
+        "Local Settings\\Temp",
+    ],
+}
+
+print_lock = threading.Lock()
+
+
+if __name__ == "__main__":
+    if not is_admin():
+        print("[WARNING] 当前未以管理员权限运行")
+        print("[WARNING] 部分系统缓存目录需要管理员权限才能清理")
+        print()
+        print("  请选择:")
+        print("    1. 以管理员身份重新运行")
+        print("    2. 退出程序")
+        print()
+        choice = input("  请输入选项 (1/2): ").strip()
+        if choice == "1":
+            print("[INFO] 正在请求管理员权限...")
+            run_as_admin()
+            sys.exit(0)
+        else:
+            print("[INFO] 用户选择退出，程序结束")
+            os.system("pause")
+            sys.exit(0)
+
+    print("[INFO] 已获取管理员权限，开始清理...")
+
+    threads = []
+
+    diry = os.path.join(winDir, "SoftwareDistribution", "Download")
+    t = threading.Thread(target=deleteDirectory, args=(diry,))
+    threads.append(t)
+
+    for path, exts in filesDict.items():
+        for ext in exts:
+            t = threading.Thread(target=deleteFilesWithExtension, args=(path, ext))
+            threads.append(t)
+
+    for path, directs in directoriesDict.items():
+        for direct in directs:
+            full_path = os.path.join(path, direct)
+            t = threading.Thread(target=deleteDirectory, args=(full_path,))
+            threads.append(t)
+
     for thread in threads:
         thread.start()
-    
+
     for thread in threads:
         thread.join()
-    
+
     print("Success free C space")
-    os.system('pause')
+    os.system("pause")
